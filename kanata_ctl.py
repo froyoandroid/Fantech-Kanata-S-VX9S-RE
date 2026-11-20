@@ -908,8 +908,14 @@ def main():
         print("✓ All mouse buttons restored to factory default bindings!")
 
     elif args.command == "tui":
-        curses.wrapper(lambda scr: run_tui(scr, mouse))
+        try:
+            curses.wrapper(lambda scr: run_tui(scr, mouse))
+        except KeyboardInterrupt:
+            pass
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        sys.exit(0)
