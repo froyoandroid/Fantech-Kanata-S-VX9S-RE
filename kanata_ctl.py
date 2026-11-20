@@ -339,7 +339,12 @@ class KanataMouse:
         mode_bit3 = (b30[3] >> 7) & 0x01
         hw_bright = (b38[7] >> 4) & 0x07
         brightness = max(0, 7 - hw_bright)
-        static_rgb = ((b20[0] >> 4) * 17, (b20[1] >> 4) * 17, (b20[2] >> 4) * 17)
+        # Active-low (common-anode) RGB nibbles: 0=255 (full on), 15=0 (off)
+        static_rgb = (
+            (15 - (b20[0] & 0x0f)) * 17,
+            (15 - (b20[1] & 0x0f)) * 17,
+            (15 - (b20[2] & 0x0f)) * 17,
+        )
 
         # Map to friendly name
         mode_name = "unknown"
@@ -461,40 +466,59 @@ class KanataMouse:
             0x02,
         ])
 
-    def set_led_color(self, r, g, b, brightness=7, slot=0):
+    def set_led_color(self, r, g, b, brightness=7):
         """
-        Sets custom static RGB color (0-255) into User Color Slot (0-5) in EEPROM
-        (HIGH nibbles of 3-byte R,G,B slots at 0x20 + slot*3, preserving DPI colors in LOW nibbles)
-        and activates Static Light On mode.
+        Sets custom static RGB color (0-255):
+        - Mode 2 (Static Light On) displays the active DPI stage color (LOW nibbles of 0x20..0x31)
+          and responds live to Command 0x14.
+        - Also updates User Color Slot 0 (HIGH nibbles of 0x20..0x22) for effect modes.
         """
         r = max(0, min(255, int(r)))
         g = max(0, min(255, int(g)))
         b = max(0, min(255, int(b)))
-        slot = max(0, min(5, int(slot)))
 
-        # Convert 8-bit RGB to 4-bit nibbles (0-15)
-        rn = (r >> 4) & 0x0f
-        gn = (g >> 4) & 0x0f
-        bn = (b >> 4) & 0x0f
-
-        # Read EEPROM blocks 0x20..0x31 (18 bytes = 6 slots x 3 bytes)
-        base_off = slot * 3
+        # Convert 8-bit RGB to inverted 4-bit active-low nibbles (0=full on, 15=off)
+        rn = 15 - ((r >> 4) & 0x0f)
+        gn = 15 - ((g >> 4) & 0x0f)
+        bn = 15 - ((b >> 4) & 0x0f)
         rgb_nibbles = [rn, gn, bn]
-        blocks = {}
+
+        # Read EEPROM blocks 0x20, 0x28, 0x30 (covers 0x20..0x31 = 6 slots x 3 bytes)
+        blocks = {
+            0x20: self.read_eeprom_block_8(0x20),
+            0x28: self.read_eeprom_block_8(0x28),
+            0x30: self.read_eeprom_block_8(0x30),
+        }
+
+        # Update LOW nibbles (DPI/Static color) for all 6 DPI stages so color applies
+        # regardless of which hardware DPI stage is currently active
+        for slot in range(6):
+            for i, nib in enumerate(rgb_nibbles):
+                addr = 0x20 + slot * 3 + i
+                blk_addr = addr & ~0x07
+                blk_off = addr & 0x07
+                blocks[blk_addr][blk_off] = (blocks[blk_addr][blk_off] & 0xf0) | nib
+
+        # Also update HIGH nibbles of User Color Slot 0 (0x20..0x22)
         for i, nib in enumerate(rgb_nibbles):
-            addr = 0x20 + base_off + i
-            blk_addr = addr & ~0x07
-            blk_off = addr & 0x07
-            if blk_addr not in blocks:
-                blocks[blk_addr] = self.read_eeprom_block_8(blk_addr)
-            # HIGH nibble = User LED color, LOW nibble = DPI color (preserved!)
-            blocks[blk_addr][blk_off] = (nib << 4) | (blocks[blk_addr][blk_off] & 0x0f)
+            blocks[0x20][i] = (nib << 4) | (blocks[0x20][i] & 0x0f)
 
         for blk_addr, data8 in blocks.items():
             self.write_eeprom_block_8(blk_addr, data8)
 
-        # Activate Static Light On using this color slot
-        self.set_led_mode("static", speed=6, brightness=brightness, color_mask=(1 << slot))
+        # Activate Static Light On (Mode 2) and commit EEPROM
+        self.set_led_mode("static", speed=6, brightness=brightness, color_mask=0x01)
+
+        # Send live Command 0x14 for current DPI stage: [0x07, 0x14, (dpi<<5)|G, (R<<4)|B, 0, 0, 0, 0]
+        cached = load_cached_state() or {}
+        dpi_idx = max(0, min(5, cached.get("active_dpi_stage", 1) - 1))
+        self.write_feature_report([
+            REPORT_ID,
+            0x14,
+            ((dpi_idx & 0x07) << 5) | gn,
+            (rn << 4) | bn,
+            0x00, 0x00, 0x00, 0x00,
+        ])
 
     def remap_button(self, button_id, func_name_or_code):
         """

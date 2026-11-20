@@ -103,7 +103,7 @@ Byte 7: 0x02
 | `0x19` | `0x18[1]` | 6-bit DPI stage enable mask (`0x3f` = all 6 enabled) |
 | `0x1c` | `0x18[4]` | LED Mode (lo 3 bits) + `flag_b3` + Speed: `0x80 \| (mode_lo3 << 4) \| (flag_b3 << 3) \| speed` |
 | `0x1d` | `0x18[5]` | `0x80 \| (color_mask & 0x7f)` (7-color enable mask) |
-| `0x20..0x31` | `0x20..0x30` | **Color Palette (Slots 0..5, 3 bytes each: R, G, B)** (`0x0042f9cf`):<br>• **High nibble (`>> 4`)**: User LED color (`0..15`)<br>• **Low nibble (`& 0x0f`)**: DPI indicator color (`0..15`) |
+| `0x20..0x31` | `0x20..0x30` | **Color Palette (Slots 0..5, 3 bytes each: R, G, B)** (`0x0042f9cf`, `0x00416b72`):<br>• **Active-low (common-anode) 4-bit nibbles**: `hw = 15 - (val >> 4)` (`0` = full ON, `15` = OFF)<br>• **High nibble (`>> 4`)**: User LED color (for multi-color animated effects)<br>• **Low nibble (`& 0x0f`)**: DPI / Static Light On color (also updated live via Command `0x14`) |
 | `0x33` | `0x30[3]` | **Bit 7 (`0x80`)**: Bit 3 of LED mode (`1` for modes `8..11`, `0` for `0..7`) (`0x004303ee`) |
 | `0x3a` | `0x38[2]` | `((scolor & 1) << 7) \| ((symmetry & 1) << 6) \| ((direction & 3) << 4) \| 0x04` (`0x004305c3`) |
 | `0x3e` | `0x38[6]` | `(UserColor[6].R << 4) \| UserColor[6].G` |
