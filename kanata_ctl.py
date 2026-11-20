@@ -659,15 +659,24 @@ def run_tui(stdscr, mouse):
         dev_info = f"Node: {mouse.dev_path} | VID:PID 30fa:1040"
         safe_addstr(stdscr, 1, max(0, (w - len(dev_info)) // 2), dev_info, curses.color_pair(1))
 
-        # Status summary
-        col = max(2, (w - 60) // 2)
-        safe_addstr(stdscr, 3, col, "┌──────────────── Current Status ───────────────┐", curses.color_pair(1))
-        safe_addstr(stdscr, 4, col, f"│ DPI     : Stage {curr_dpi}/6 ({DPI_STAGES.get(curr_dpi, 400)} DPI){'':<20} │")
-        safe_addstr(stdscr, 5, col, f"│ Polling : {rates[curr_rate_idx]} Hz{'':<31} │")
+        # Status summary (strictly aligned box width)
+        inner_w = 56
+        box_w = inner_w + 4
+        col = max(2, (w - box_w) // 2)
+        hdr = " Current Status "
+        pad_l = (box_w - 2 - len(hdr)) // 2
+        pad_r = (box_w - 2 - len(hdr)) - pad_l
         mode_desc = LED_MODES[mode_keys[curr_led_idx]][3]
-        safe_addstr(stdscr, 6, col, f"│ Lighting: {mode_desc:<35} │")
-        safe_addstr(stdscr, 7, col, f"│ Buttons : Factory Default (Left/Mid/Right/Back/Fwd/DPI)│")
-        safe_addstr(stdscr, 8, col, "└───────────────────────────────────────────────┘", curses.color_pair(1))
+        rows = [
+            f"DPI     : Stage {curr_dpi}/6 ({DPI_STAGES.get(curr_dpi, 400)} DPI)",
+            f"Polling : {rates[curr_rate_idx]} Hz",
+            f"Lighting: {mode_desc}",
+            "Buttons : Factory Default (L/M/R/Back/Fwd/DPI)",
+        ]
+        safe_addstr(stdscr, 3, col, f"┌{'─' * pad_l}{hdr}{'─' * pad_r}┐", curses.color_pair(1))
+        for idx_r, row in enumerate(rows):
+            safe_addstr(stdscr, 4 + idx_r, col, f"│ {row[:inner_w]:<{inner_w}} │")
+        safe_addstr(stdscr, 4 + len(rows), col, f"└{'─' * (box_w - 2)}┘", curses.color_pair(1))
 
         # Controls list
         safe_addstr(stdscr, 10, col, "Hotkeys:", curses.color_pair(3) | curses.A_BOLD)
