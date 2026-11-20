@@ -64,14 +64,12 @@ Byte 6: (mode_bit3 & 1) << 7                # Bit 7 = bit 3 of LED mode (for mod
 Byte 7: 0x02
 ```
 
-### Command `0x14` — USB Polling Rate (`0x00444f20`)
+### Command `0x14` — Live DPI / Static Color (`0x00444f10`)
 ```text
-[0x07, 0x14, b2, b3, 0x00, 0x00, 0x00, 0x00]
+[0x07, 0x14, (dpi_idx << 5) | G_inv, (R_inv << 4) | B_inv, 0x00, 0x00, 0x00, 0x00]
 ```
-- `125 Hz`: `(0xa0, 0x40)`
-- `250 Hz`: `(0x20, 0x00)`
-- `500 Hz`: `(0xf0, 0x40)`
-- `1000 Hz`: `(0x60, 0x00)`
+- `R_inv`, `G_inv`, `B_inv`: Active-low inverted 4-bit nibbles (`15 - (val >> 4)`), where `0` = full ON and `15` = OFF.
+- Immediately updates the live color of `dpi_idx` (`0..5`) when in Mode 2 (`Static Light On`).
 
 ### Command `0x18` & `0x20` — EEPROM Read / Write / Commit (`0x00425a80`, `0x00425b50`, `0x00436380`)
 - **Read byte at `addr`**:
@@ -103,6 +101,7 @@ Byte 7: 0x02
 | `0x19` | `0x18[1]` | 6-bit DPI stage enable mask (`0x3f` = all 6 enabled) |
 | `0x1c` | `0x18[4]` | LED Mode (lo 3 bits) + `flag_b3` + Speed: `0x80 \| (mode_lo3 << 4) \| (flag_b3 << 3) \| speed` |
 | `0x1d` | `0x18[5]` | `0x80 \| (color_mask & 0x7f)` (7-color enable mask) |
+| `0x1e` | `0x18[6]` | **USB Polling Rate Divider** (`0x0043c450`, `0x0042f914`): `interval_ms = val + 1` (`0x00`=1000Hz, `0x01`=500Hz, `0x03`=250Hz, `0x07`=125Hz) |
 | `0x20..0x31` | `0x20..0x30` | **Color Palette (Slots 0..5, 3 bytes each: R, G, B)** (`0x0042f9cf`, `0x00416b72`):<br>• **Active-low (common-anode) 4-bit nibbles**: `hw = 15 - (val >> 4)` (`0` = full ON, `15` = OFF)<br>• **High nibble (`>> 4`)**: User LED color (for multi-color animated effects)<br>• **Low nibble (`& 0x0f`)**: DPI / Static Light On color (also updated live via Command `0x14`) |
 | `0x33` | `0x30[3]` | **Bit 7 (`0x80`)**: Bit 3 of LED mode (`1` for modes `8..11`, `0` for `0..7`) (`0x004303ee`) |
 | `0x3a` | `0x38[2]` | `((scolor & 1) << 7) \| ((symmetry & 1) << 6) \| ((direction & 3) << 4) \| 0x04` (`0x004305c3`) |

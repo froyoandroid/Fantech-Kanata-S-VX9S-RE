@@ -83,11 +83,14 @@ DPI_STAGES = {
     6: 4800,
 }
 
+# USB Polling Rate hardware interval divider in EEPROM Block 0x18 Byte 6 (0x1e)
+# Reverse-engineered from Gaming Mouse 3.0.exe @ 0x43c450 & 0x42f914:
+#   interval_ms = divider + 1 -> 0x00=1000Hz, 0x01=500Hz, 0x03=250Hz, 0x07=125Hz
 POLLING_RATES = {
-    125:  (0xa0, 0x40),
-    250:  (0x20, 0x00),
-    500:  (0xf0, 0x40),
-    1000: (0x60, 0x00),
+    125:  0x07,
+    250:  0x03,
+    500:  0x01,
+    1000: 0x00,
 }
 
 # Verified firmware LED modes (reverse-engineered from Gaming Mouse 3.0.exe @ 0x42f567)
@@ -320,17 +323,15 @@ class KanataMouse:
         dpi_source = cached.get("source", "default")
         daemon_pid = is_daemon_running()
 
-        # Read active polling rate from onboard EEPROM byte 0
-        b0 = self.read_eeprom_byte(0x00)
-        rate_code = b0 & 0x07
-        rate_map = {0: 125, 1: 250, 2: 500, 3: 1000}
-        rate_hz = rate_map.get(rate_code, 500)
-
-        # Read LED configuration from EEPROM blocks 0x18, 0x20, 0x30, 0x38
+        # Read LED & polling rate configuration from EEPROM blocks 0x18, 0x20, 0x30, 0x38
         b18 = self.read_eeprom_block_8(0x18)
         b20 = self.read_eeprom_block_8(0x20)
         b30 = self.read_eeprom_block_8(0x30)
         b38 = self.read_eeprom_block_8(0x38)
+
+        # Active polling rate divider in EEPROM Block 0x18 Byte 6 (0x1e)
+        rate_map = {0x07: 125, 0x03: 250, 0x01: 500, 0x00: 1000}
+        rate_hz = rate_map.get(b18[6], 500)
 
         led_raw = b18[4]
         mode_lo3 = (led_raw >> 4) & 0x07
@@ -400,11 +401,14 @@ class KanataMouse:
         save_cached_state(st)
 
     def set_polling_rate(self, rate_hz):
-        """Sets polling rate (125, 250, 500, 1000 Hz)."""
+        """Sets USB polling rate (125, 250, 500, 1000 Hz) via EEPROM Block 0x18 Byte 6 (0x1e)."""
         if rate_hz not in POLLING_RATES:
             raise ValueError(f"Invalid rate: {rate_hz}. Choices: {list(POLLING_RATES.keys())}")
-        b2, b3 = POLLING_RATES[rate_hz]
-        self.write_feature_report([REPORT_ID, 0x14, b2, b3, 0, 0, 0, 0])
+        divider = POLLING_RATES[rate_hz]
+        b18 = self.read_eeprom_block_8(0x18)
+        b18[6] = divider
+        self.write_eeprom_block_8(0x18, b18)
+        self.commit_eeprom()
 
     def set_led_mode(self, mode_name, speed=3, brightness=7, color_mask=None, direction=0, symmetry=0):
         """

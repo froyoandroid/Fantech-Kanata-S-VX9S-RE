@@ -28,7 +28,7 @@
 
 #define FANTECH_CMD_BUTTON_REMAP     0x10
 #define FANTECH_CMD_LIVE_STATE       0x13
-#define FANTECH_CMD_POLLING_RATE     0x14
+#define FANTECH_CMD_LIVE_DPI_COLOR   0x14
 #define FANTECH_CMD_LED_COLOR        0x15
 #define FANTECH_CMD_EEPROM           0x18
 #define FANTECH_CMD_COMMIT           0x20
@@ -289,69 +289,120 @@ fantech_commit(struct ratbag_device *device)
 			}
 		}
 
-		/* Check LED settings */
-		led = ratbag_profile_get_led(profile, 0);
-		if (led) {
-			uint8_t b18[8];
-			fantech_read_eeprom_block_8(device, 0x18, b18);
+		uint8_t b18[8], b30[8], b38[8];
+		fantech_read_eeprom_block_8(device, 0x18, b18);
+		fantech_read_eeprom_block_8(device, 0x30, b30);
+		fantech_read_eeprom_block_8(device, 0x38, b38);
 
-			if (led->mode == RATBAG_LED_OFF) {
-				b18[4] = 0x80;
-				fantech_write_eeprom_block_8(device, 0x18, b18);
-				fantech_commit_eeprom(device);
-				uint8_t live_off[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | active_dpi, 0x80, 0, 0, 0, 0x02 };
-				fantech_send_cmd(device, live_off);
-			} else if (led->mode == RATBAG_LED_ON) {
-				/* Custom static RGB color */
-				uint8_t rn = (led->color.red >> 4) & 0x0f;
-				uint8_t gn = (led->color.green >> 4) & 0x0f;
-				uint8_t bn = (led->color.blue >> 4) & 0x0f;
+		/* Update active DPI stage in EEPROM Block 0x18 Byte 0 */
+		b18[0] = 0x18 | (active_dpi & 0x07);
 
-				uint8_t b20[8];
-				fantech_read_eeprom_block_8(device, 0x20, b20);
-				b20[0] = (rn << 4) | gn;
-				b20[1] = (bn << 4) | (b20[1] & 0x0f);
-				fantech_write_eeprom_block_8(device, 0x20, b20);
-
-				b18[4] = 0xb3; // Static Light On
-				b18[5] = 0x01; // Slot 0 enabled
-				fantech_write_eeprom_block_8(device, 0x18, b18);
-				fantech_commit_eeprom(device);
-
-				uint8_t live_on[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | active_dpi, 0xb3, 0, 0, 0, 0x02 };
-				fantech_send_cmd(device, live_on);
-			} else if (led->mode == RATBAG_LED_BREATHING) {
-				b18[4] = 0x93; // DPI Breathing
-				b18[5] = 0x7f;
-				fantech_write_eeprom_block_8(device, 0x18, b18);
-				fantech_commit_eeprom(device);
-				uint8_t live_br[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | active_dpi, 0x93, 0, 0, 0, 0x02 };
-				fantech_send_cmd(device, live_br);
-			} else {
-				/* Default Neon RGB flow */
-				b18[4] = 0xf3; // Neon
-				b18[5] = 0x7f;
-				fantech_write_eeprom_block_8(device, 0x18, b18);
-				fantech_commit_eeprom(device);
-				uint8_t live_neon[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | active_dpi, 0xf3, 0, 0, 0, 0x02 };
-				fantech_send_cmd(device, live_neon);
+		/* Update USB Polling Rate divider in EEPROM Block 0x18 Byte 6 (0x1e) */
+		if (profile->hz > 0) {
+			switch (profile->hz) {
+			case 125:  b18[6] = 0x07; break;
+			case 250:  b18[6] = 0x03; break;
+			case 500:  b18[6] = 0x01; break;
+			case 1000: b18[6] = 0x00; break;
+			default: break;
 			}
 		}
 
-		/* Update Polling Rate via Command 0x14 */
-		if (profile->hz > 0) {
-			uint8_t b2 = 0xf0, b3_rate = 0x40;
-			switch (profile->hz) {
-			case 125:  b2 = 0xa0; b3_rate = 0x40; break;
-			case 250:  b2 = 0x20; b3_rate = 0x00; break;
-			case 500:  b2 = 0xf0; b3_rate = 0x40; break;
-			case 1000: b2 = 0x60; b3_rate = 0x00; break;
-			default: break;
+		/* Check LED settings */
+		led = ratbag_profile_get_led(profile, 0);
+		if (led) {
+			uint8_t mode_byte = 0xe3; /* Neon default */
+			uint8_t color_mask = 0x7f;
+			uint8_t hw_bright = 0x00; /* 0 = max brightness (inverted) */
+
+			/* Clear mode bit 3 in Block 0x30 Byte 3 for modes 0..7 */
+			b30[3] &= 0x7f;
+			b38[2] = 0x04;
+			b38[7] = (hw_bright << 4) | (b38[7] & 0x0f);
+
+			if (led->mode == RATBAG_LED_OFF) {
+				mode_byte = 0x87; /* Mode 13: LED Off (speed=7) */
+				b18[4] = mode_byte;
+				b18[5] = 0x80 | color_mask;
+				fantech_write_eeprom_block_8(device, 0x30, b30);
+				fantech_write_eeprom_block_8(device, 0x38, b38);
+				fantech_write_eeprom_block_8(device, 0x18, b18);
+				fantech_commit_eeprom(device);
+
+				uint8_t live_off[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | color_mask, mode_byte, 0x04, hw_bright, 0x00, 0x02 };
+				fantech_send_cmd(device, live_off);
+			} else if (led->mode == RATBAG_LED_ON) {
+				/* Custom static RGB color (active-low inverted 4-bit nibbles) */
+				uint8_t rn = 15 - ((led->color.red >> 4) & 0x0f);
+				uint8_t gn = 15 - ((led->color.green >> 4) & 0x0f);
+				uint8_t bn = 15 - ((led->color.blue >> 4) & 0x0f);
+				uint8_t nibs[3] = { rn, gn, bn };
+
+				uint8_t b20[8], b28[8];
+				fantech_read_eeprom_block_8(device, 0x20, b20);
+				fantech_read_eeprom_block_8(device, 0x28, b28);
+
+				/* Update LOW nibbles (DPI/Static color) across all 6 slots */
+				for (int slot = 0; slot < 6; slot++) {
+					for (int i = 0; i < 3; i++) {
+						int addr = 0x20 + slot * 3 + i;
+						int off = addr & 0x07;
+						if (addr < 0x28)
+							b20[off] = (b20[off] & 0xf0) | nibs[i];
+						else if (addr < 0x30)
+							b28[off] = (b28[off] & 0xf0) | nibs[i];
+						else
+							b30[off] = (b30[off] & 0xf0) | nibs[i];
+					}
+				}
+				/* Also update User Color Slot 0 HIGH nibbles */
+				b20[0] = (rn << 4) | (b20[0] & 0x0f);
+				b20[1] = (gn << 4) | (b20[1] & 0x0f);
+				b20[2] = (bn << 4) | (b20[2] & 0x0f);
+
+				fantech_write_eeprom_block_8(device, 0x20, b20);
+				fantech_write_eeprom_block_8(device, 0x28, b28);
+				fantech_write_eeprom_block_8(device, 0x30, b30);
+				fantech_write_eeprom_block_8(device, 0x38, b38);
+
+				mode_byte = 0xa6; /* Mode 2: Static Light On (speed=6) */
+				color_mask = 0x01;
+				b18[4] = mode_byte;
+				b18[5] = 0x80 | color_mask;
+				fantech_write_eeprom_block_8(device, 0x18, b18);
+				fantech_commit_eeprom(device);
+
+				uint8_t live_on[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | color_mask, mode_byte, 0x04, hw_bright, 0x00, 0x02 };
+				fantech_send_cmd(device, live_on);
+
+				uint8_t live_col[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_DPI_COLOR, ((active_dpi & 0x07) << 5) | gn, (rn << 4) | bn, 0, 0, 0, 0 };
+				fantech_send_cmd(device, live_col);
+			} else if (led->mode == RATBAG_LED_BREATHING) {
+				mode_byte = 0x93; /* Mode 1: Cycle Breathing */
+				b18[4] = mode_byte;
+				b18[5] = 0x80 | color_mask;
+				fantech_write_eeprom_block_8(device, 0x30, b30);
+				fantech_write_eeprom_block_8(device, 0x38, b38);
+				fantech_write_eeprom_block_8(device, 0x18, b18);
+				fantech_commit_eeprom(device);
+
+				uint8_t live_br[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | color_mask, mode_byte, 0x04, hw_bright, 0x00, 0x02 };
+				fantech_send_cmd(device, live_br);
+			} else {
+				mode_byte = 0xe3; /* Mode 6: Neon */
+				b18[4] = mode_byte;
+				b18[5] = 0x80 | color_mask;
+				fantech_write_eeprom_block_8(device, 0x30, b30);
+				fantech_write_eeprom_block_8(device, 0x38, b38);
+				fantech_write_eeprom_block_8(device, 0x18, b18);
+				fantech_commit_eeprom(device);
+
+				uint8_t live_neon[8] = { FANTECH_REPORT_ID, FANTECH_CMD_LIVE_STATE, 0x80 | color_mask, mode_byte, 0x04, hw_bright, 0x00, 0x02 };
+				fantech_send_cmd(device, live_neon);
 			}
-			uint8_t rate_cmd[FANTECH_REPORT_SIZE] = {
-				FANTECH_REPORT_ID, FANTECH_CMD_POLLING_RATE, b2, b3_rate, 0, 0, 0, 0
-			};
-			fantech_send_cmd(device, rate_cmd);
+		} else {
+			fantech_write_eeprom_block_8(device, 0x18, b18);
+			fantech_commit_eeprom(device);
 		}
 	}
 
