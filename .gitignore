@@ -1,0 +1,19 @@
+# Proprietary Windows vendor software & dumps (do not commit)
+vendor/
+*.exe
+*.dll
+*.dat
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Logs & temporary captures
+*.log
+*.pcap
+*.pcapng
+*.bin
+*.tmp

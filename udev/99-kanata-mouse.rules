@@ -1,0 +1,2 @@
+# Fantech Kanata S (VX9S) Gaming Mouse (USB ID: 30fa:1040)
+KERNEL=="hidraw*", ATTRS{idVendor}=="30fa", ATTRS{idProduct}=="1040", MODE="0666"

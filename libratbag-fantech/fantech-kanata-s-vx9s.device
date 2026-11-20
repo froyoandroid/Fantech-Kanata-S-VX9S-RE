@@ -1,0 +1,9 @@
+# Fantech Kanata S (VX9S)
+# Vendor: Fantech
+# Product: Kanata S VX9S
+
+[Device]
+Name=Fantech Kanata S VX9S
+DeviceMatch=usb:30fa:1040
+DeviceType=mouse
+Driver=fantech
